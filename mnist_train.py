@@ -15,36 +15,55 @@ MODEL_NAME = "Model.ckpt"
 
 
 def train(mnist):
-    x = tf.placeholder(tf.float32, [None, mnist_inference.INPUT_NODE], name = 'x-input')
-    y_ = tf.placeholder(tf.float32, [None, mnist_inference.OUTPUT_NODE], name = 'y-input')
+    with tf.name_scope('input'):
+        x = tf.placeholder(tf.float32, [None, mnist_inference.INPUT_NODE], name = 'x-input')
+        y_ = tf.placeholder(tf.float32, [None, mnist_inference.OUTPUT_NODE], name = 'y-input')
     regularizer = tf.contrib.layers.l2_regularizer(REGULARAZTION_RATE)
     y = mnist_inference.inference(x, regularizer)
     global_step = tf.Variable(0, trainable=False)
-    variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
-    variable_averages_op = variable_averages.apply(tf.trainable_variables())
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=tf.argmax(y_, 1))
-    cross_entropy_mean = tf.reduce_mean(cross_entropy)
-    loss = cross_entropy_mean + tf.add_n(tf.get_collection('losses'))
-    learning_rate = tf.train.exponential_decay(LEARNING_RATE_BASE,
+
+    with tf.name_scope('moving_average'):
+        variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
+        variable_averages_op = variable_averages.apply(tf.trainable_variables())
+
+    with tf.name_scope('loss_function'):
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=tf.argmax(y_, 1))
+        cross_entropy_mean = tf.reduce_mean(cross_entropy)
+        loss = cross_entropy_mean + tf.add_n(tf.get_collection('losses'))
+    
+    with tf.name_scope('train_step'):
+        learning_rate = tf.train.exponential_decay(LEARNING_RATE_BASE,
                                                 global_step, 
                                                 mnist.train.num_examples /BATCH_SIZE, 
                                                 LEARNING_RATE_DECAY
                                                 )
-    train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, global_step = global_step)
-    with tf.control_dependencies([train_step, variable_averages_op]):
-        train_op = tf.no_op(name='train')
+        train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, global_step = global_step)
+        with tf.control_dependencies([train_step, variable_averages_op]):
+            train_op = tf.no_op(name='train')
+
+    writer = tf.summary.FileWriter("./log/", tf.get_default_graph());
+    writer.close()
     saver = tf.train.Saver()
+    train_writer = tf.summary.FileWriter('./log/train/', tf.get_default_graph())
+
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         for i in range(TRAING_STEPS):
             xs, ys = mnist.train.next_batch(BATCH_SIZE)
-            _, loss_value, step = sess.run([train_op, loss, global_step], feed_dict={x:xs, y_:ys})
+
             if i % 2000 == 0:
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
+                _, loss_value, step = sess.run([train_op, loss, global_step], feed_dict={x:xs, y_:ys}, options=run_options, run_metadata=run_metadata)
+                train_writer.add_run_metadata(run_metadata, 'step %03d' % i)
                 print("After %d training steps, loss on training batch is %g." % (step, loss_value))
                 saver.save(sess, os.path.join(MODEL_SAVE_PATH, MODEL_NAME), global_step=global_step)
+            else:
+                _, loss_value, step = sess.run([train_op, loss, global_step], feed_dict={x:xs, y_:ys})
+    train_writer.close()
 
 def main(argv=None):
-    mnist = input_data.read_data_sets("/Users/chanst/Desktop/tfDemo/data", one_hot=True)
+    mnist = input_data.read_data_sets("./data", one_hot=True)
     train(mnist)
 
 if __name__ == '__main__':
